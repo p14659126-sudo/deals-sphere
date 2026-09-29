@@ -1,0 +1,122 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isAdmin() {
+      return isSignedIn() && (
+        request.auth.token.email == 'p14659126@gmail.com' ||
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+      );
+    }
+
+    // Default deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Test connection doc
+    match /test/connection {
+      allow read: if true;
+    }
+
+    // Admins Collection
+    match /admins/{adminId} {
+      allow read: if isSignedIn() && (request.auth.uid == adminId || isAdmin());
+      allow write: if isAdmin();
+    }
+
+    // Users Collection (Owner-only read/write for private profile, cart & PII)
+    match /users/{userId} {
+      allow read, write: if isValidId(userId) && (isOwner(userId) || isAdmin());
+    }
+
+    match /users/{userId}/{allPaths=**} {
+      allow read, write: if isValidId(userId) && (isOwner(userId) || isAdmin());
+    }
+
+    // Unique Account Channel Record (1 channel per user account)
+    match /user_channels/{userId} {
+      allow read: if true;
+      allow create: if isSignedIn() && isValidId(userId) && request.auth.uid == userId;
+      allow delete: if isValidId(userId) && (isOwner(userId) || isAdmin());
+      allow update: if false;
+    }
+
+    // Channels Collection (Public readable profiles; authenticated owner & admin create/update/delete; max 1 channel per account)
+    match /channels/{channelId} {
+      allow read: if true;
+      allow create: if isSignedIn() && isValidId(channelId) && (
+        request.resource.data.ownerId == request.auth.uid
+      ) && !exists(/databases/$(database)/documents/user_channels/$(request.auth.uid));
+      allow update: if isValidId(channelId) && (
+        isAdmin() ||
+        (isSignedIn() && resource.data.ownerId == request.auth.uid && request.resource.data.ownerId == resource.data.ownerId) ||
+        // Allow public views and followers count increment
+        (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['views', 'followersCount']))
+      );
+      allow delete: if isValidId(channelId) && (
+        isAdmin() || (isSignedIn() && resource.data.ownerId == request.auth.uid)
+      );
+    }
+
+    // Products Collection (Public browse, authenticated channel owner create/update/delete, admin moderate)
+    match /products/{productId} {
+      allow read: if true;
+      allow create: if isSignedIn() && isValidId(productId) && (
+        request.resource.data.sellerId == request.auth.uid ||
+        request.resource.data.ownerId == request.auth.uid
+      );
+      allow update: if isValidId(productId) && (
+        isAdmin() ||
+        (isSignedIn() && (resource.data.sellerId == request.auth.uid || resource.data.ownerId == request.auth.uid)) ||
+        // Allow public views and clicks increment
+        (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['views', 'clicks']))
+      );
+      allow delete: if isValidId(productId) && (
+        isAdmin() || (isSignedIn() && (resource.data.sellerId == request.auth.uid || resource.data.ownerId == request.auth.uid))
+      );
+    }
+
+    // Analytics Collection (Public/user click and view logging)
+    match /analytics/{eventId} {
+      allow create: if isValidId(eventId);
+      allow read: if isSignedIn() && (
+        isAdmin() || (resource.data.userId == request.auth.uid)
+      );
+      allow update, delete: if isAdmin();
+    }
+
+    // Channel Followers Collection
+    match /followers/{followerId} {
+      allow read: if true;
+      allow create: if isSignedIn() && isValidId(followerId) && request.resource.data.userId == request.auth.uid;
+      allow delete: if isSignedIn() && isValidId(followerId) && (resource.data.userId == request.auth.uid || isAdmin());
+      allow update: if false;
+    }
+
+    // Moderation Reports Collection (Anyone can submit; only admin can read/moderate)
+    match /reports/{reportId} {
+      allow create: if isValidId(reportId);
+      allow read, update, delete: if isAdmin();
+    }
+
+    // Orders Collection (Owner-only read and create)
+    match /orders/{orderId} {
+      allow read, delete: if isSignedIn() && (isAdmin() || resource.data.userId == request.auth.uid);
+      allow create: if isSignedIn() && isValidId(orderId) && request.resource.data.userId == request.auth.uid;
+      allow update: if isSignedIn() && isValidId(orderId) && (isAdmin() || (resource.data.userId == request.auth.uid && request.resource.data.userId == request.auth.uid));
+    }
+  }
+}

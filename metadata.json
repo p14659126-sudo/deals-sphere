@@ -1,0 +1,8 @@
+{
+  "name": "Remix Deal Sphere",
+  "description": "Curated e-commerce affiliate marketing platform for graphic novels, comics, collectibles, and creator tech with multi-merchant price comparison.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

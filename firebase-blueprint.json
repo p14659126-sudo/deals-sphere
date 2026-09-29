@@ -1,0 +1,209 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile with role (normal or business)",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "name": { "type": "string", "maxLength": 128 },
+        "email": { "type": "string", "maxLength": 128 },
+        "accountType": { "type": "string", "enum": ["normal", "business", "admin"] },
+        "businessName": { "type": "string", "maxLength": 128 },
+        "businessBio": { "type": "string", "maxLength": 500 },
+        "joinedDate": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["id", "name", "email", "accountType"]
+    },
+    "Channel": {
+      "title": "Channel",
+      "description": "Public channel/store created by a seller or curator",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "ownerId": { "type": "string", "maxLength": 128 },
+        "name": { "type": "string", "maxLength": 128 },
+        "username": { "type": "string", "maxLength": 64, "pattern": "^[a-z0-9_-]+$" },
+        "description": { "type": "string", "maxLength": 3000 },
+        "logo": { "type": "string", "maxLength": 5000 },
+        "banner": { "type": "string", "maxLength": 5000 },
+        "tagline": { "type": "string", "maxLength": 256 },
+        "category": { "type": "string", "maxLength": 64 },
+        "channelType": { "type": "string", "enum": ["Personal", "Creator", "Store", "Brand", "Affiliate/Deals", "Other"] },
+        "country": { "type": "string", "maxLength": 64 },
+        "language": { "type": "string", "maxLength": 64 },
+        "contactEmail": { "type": "string", "maxLength": 128 },
+        "websiteUrl": { "type": "string", "maxLength": 2000 },
+        "instagramUrl": { "type": "string", "maxLength": 2000 },
+        "youtubeUrl": { "type": "string", "maxLength": 2000 },
+        "facebookUrl": { "type": "string", "maxLength": 2000 },
+        "twitterUrl": { "type": "string", "maxLength": 2000 },
+        "businessName": { "type": "string", "maxLength": 128 },
+        "gstInfo": { "type": "string", "maxLength": 128 },
+        "sellerContact": { "type": "string", "maxLength": 128 },
+        "status": { "type": "string", "enum": ["active", "suspended"] },
+        "followersCount": { "type": "number" },
+        "views": { "type": "number" },
+        "createdAt": { "type": "string", "maxLength": 64 },
+        "updatedAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["id", "ownerId", "name", "username", "description", "category", "channelType", "country", "language", "contactEmail", "status"]
+    },
+    "Product": {
+      "title": "Product",
+      "description": "Product published within a channel by a seller",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "channelId": { "type": "string", "maxLength": 128 },
+        "ownerId": { "type": "string", "maxLength": 128 },
+        "sellerId": { "type": "string", "maxLength": 128 },
+        "sellerName": { "type": "string", "maxLength": 128 },
+        "title": { "type": "string", "maxLength": 256 },
+        "description": { "type": "string", "maxLength": 5000 },
+        "imageUrl": { "type": "string", "maxLength": 5000 },
+        "images": { "type": "array" },
+        "videoUrl": { "type": "string", "maxLength": 2000 },
+        "productLink": { "type": "string", "maxLength": 2000 },
+        "affiliateUrl": { "type": "string", "maxLength": 2000 },
+        "affiliateNetwork": { "type": "string", "maxLength": 128 },
+        "merchant": { "type": "string", "maxLength": 128 },
+        "productType": { "type": "string", "enum": ["Physical", "Digital", "Affiliate", "Deal/Offer", "Other"] },
+        "status": { "type": "string", "enum": ["draft", "pending", "published", "rejected", "archived"] },
+        "price": { "type": "number" },
+        "originalPrice": { "type": "number" },
+        "mrp": { "type": "number" },
+        "discount": { "type": "number" },
+        "currency": { "type": "string", "maxLength": 8 },
+        "category": { "type": "string", "maxLength": 64 },
+        "brand": { "type": "string", "maxLength": 128 },
+        "sku": { "type": "string", "maxLength": 64 },
+        "tags": { "type": "array" },
+        "highlights": { "type": "array" },
+        "color": { "type": "string", "maxLength": 64 },
+        "size": { "type": "string", "maxLength": 64 },
+        "variants": { "type": "array" },
+        "shippingInfo": { "type": "string", "maxLength": 256 },
+        "deliveryInfo": { "type": "string", "maxLength": 256 },
+        "couponCode": { "type": "string", "maxLength": 64 },
+        "couponExpiry": { "type": "string", "maxLength": 64 },
+        "rating": { "type": "number" },
+        "reviewCount": { "type": "number" },
+        "views": { "type": "number" },
+        "clicks": { "type": "number" },
+        "inStock": { "type": "boolean" },
+        "freeDelivery": { "type": "boolean" },
+        "rejectionReason": { "type": "string", "maxLength": 500 },
+        "createdAt": { "type": "string", "maxLength": 64 },
+        "updatedAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["id", "channelId", "sellerId", "title", "description", "productLink", "price", "category", "status"]
+    },
+    "AnalyticsEvent": {
+      "title": "AnalyticsEvent",
+      "description": "Recorded view, click, buy, or share metric event",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "userId": { "type": "string", "maxLength": 128 },
+        "channelId": { "type": "string", "maxLength": 128 },
+        "productId": { "type": "string", "maxLength": 128 },
+        "eventType": { "type": "string", "enum": ["channel_view", "product_view", "product_click", "buy_click", "share", "follow"] },
+        "timestamp": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["id", "channelId", "eventType", "timestamp"]
+    },
+    "ChannelFollower": {
+      "title": "ChannelFollower",
+      "description": "Association record for a user following a specific channel",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "userId": { "type": "string", "maxLength": 128 },
+        "channelId": { "type": "string", "maxLength": 128 },
+        "createdAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["id", "userId", "channelId", "createdAt"]
+    },
+    "Report": {
+      "title": "Report",
+      "description": "Moderation report for violating product or channel",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "reporterId": { "type": "string", "maxLength": 128 },
+        "reporterEmail": { "type": "string", "maxLength": 128 },
+        "targetType": { "type": "string", "enum": ["product", "channel"] },
+        "targetId": { "type": "string", "maxLength": 128 },
+        "targetTitle": { "type": "string", "maxLength": 256 },
+        "reason": { "type": "string", "maxLength": 128 },
+        "details": { "type": "string", "maxLength": 1000 },
+        "status": { "type": "string", "enum": ["pending", "resolved", "dismissed"] },
+        "createdAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["id", "targetType", "targetId", "reason", "details", "status"]
+    },
+    "Order": {
+      "title": "Order",
+      "description": "Recorded outbound order created by authenticated user",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "userId": { "type": "string", "maxLength": 128 },
+        "productId": { "type": "string", "maxLength": 128 },
+        "productTitle": { "type": "string", "maxLength": 256 },
+        "price": { "type": "number" },
+        "currency": { "type": "string", "maxLength": 8 },
+        "targetLink": { "type": "string", "maxLength": 2000 },
+        "clickedAt": { "type": "string", "maxLength": 64 },
+        "status": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["id", "userId", "productId", "targetLink"]
+    },
+    "UserChannel": {
+      "title": "UserChannel",
+      "description": "Unique 1-per-account channel mapping enforcing single channel per user account",
+      "type": "object",
+      "properties": {
+        "channelId": { "type": "string", "maxLength": 128 },
+        "ownerId": { "type": "string", "maxLength": 128 },
+        "createdAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["channelId", "ownerId", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "User profile with role status"
+    },
+    "/user_channels/{userId}": {
+      "schema": "UserChannel",
+      "description": "Unique 1-per-account channel mapping for user account"
+    },
+    "/channels/{channelId}": {
+      "schema": "Channel",
+      "description": "Public channel profiles created by sellers"
+    },
+    "/products/{productId}": {
+      "schema": "Product",
+      "description": "Products uploaded and managed by channel owners"
+    },
+    "/analytics/{eventId}": {
+      "schema": "AnalyticsEvent",
+      "description": "Event tracking for channel views, product clicks, and engagement"
+    },
+    "/followers/{followerId}": {
+      "schema": "ChannelFollower",
+      "description": "Follow records between authenticated users and channels"
+    },
+    "/reports/{reportId}": {
+      "schema": "Report",
+      "description": "Moderation reports submitted by users"
+    },
+    "/orders/{orderId}": {
+      "schema": "Order",
+      "description": "User outbound orders and visits"
+    }
+  }
+}
