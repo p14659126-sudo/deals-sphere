@@ -151,11 +151,13 @@ export async function createChannel(channelData: Omit<Channel, 'id' | 'createdAt
     throw new Error('Channel owner ID is required.');
   }
 
-  // Enforce one channel per account policy
+  // Enforce one channel per account policy: if already exists, return the existing channel
   const existingOwnedChannels = await getChannelsByOwner(ownerId);
   if (existingOwnedChannels.length > 0) {
     const existing = existingOwnedChannels[0];
-    throw new Error(`Only one channel per account is permitted. You already have an active channel: @${existing.username}.`);
+    const local = getLocal<Channel[]>(CHANNELS_KEY, []);
+    setLocal(CHANNELS_KEY, [existing, ...local.filter((c) => c.id !== existing.id)]);
+    return existing;
   }
 
   const channelId = channelData.id || generateChannelId();

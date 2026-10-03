@@ -41,6 +41,8 @@ interface Props {
   onSelectCategory: (cat: string) => void;
   availableCategories: string[];
   userChannels?: Channel[];
+  onOpenMyChannel?: () => void;
+  onOpenUploadVideo?: () => void;
   isAdmin?: boolean;
 }
 
@@ -53,7 +55,9 @@ export const Sidebar: React.FC<Props> = ({
   cartCount,
   ordersCount,
   onOpenUpload,
+  onOpenUploadVideo,
   onOpenCreateChannel,
+  onOpenMyChannel,
   onOpenSignIn,
   onOpenSignUp,
   onSignOut,
@@ -197,6 +201,31 @@ export const Sidebar: React.FC<Props> = ({
             {currentUser && hasChannel ? (
               <>
                 <button
+                  onClick={() => {
+                    if (onOpenMyChannel) {
+                      onOpenMyChannel();
+                    } else {
+                      handleNav('channel-profile' as any);
+                    }
+                    onClose();
+                  }}
+                  className="w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-bold text-slate-900 bg-indigo-50/80 hover:bg-indigo-100/70 border border-indigo-200/80 transition-colors"
+                >
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <Store className="w-4 h-4 text-indigo-600 shrink-0" />
+                    <div className="min-w-0 text-left">
+                      <span className="block font-black text-indigo-950 leading-tight">My Channel</span>
+                      {userChannels[0] && (
+                        <span className="block text-[10px] text-slate-500 font-mono font-normal truncate">
+                          @{userChannels[0].username}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  <ChevronRight className="w-3.5 h-3.5 text-indigo-400" />
+                </button>
+
+                <button
                   onClick={() => handleNav('dashboard')}
                   className={`w-full flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-semibold transition-colors ${
                     activeTab === 'dashboard'
@@ -205,7 +234,7 @@ export const Sidebar: React.FC<Props> = ({
                   }`}
                 >
                   <Layers className="w-4 h-4 text-indigo-600" />
-                  <span>Seller Dashboard</span>
+                  <span>Creator Studio</span>
                 </button>
 
                 <button
@@ -218,6 +247,19 @@ export const Sidebar: React.FC<Props> = ({
                   <PlusCircle className="w-4 h-4 text-indigo-600" />
                   <span>Add Product</span>
                 </button>
+
+                {onOpenUploadVideo && (
+                  <button
+                    onClick={() => {
+                      onOpenUploadVideo();
+                      onClose();
+                    }}
+                    className="w-full flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-semibold text-red-700 hover:bg-red-50"
+                  >
+                    <PlusCircle className="w-4 h-4 text-red-600" />
+                    <span>Upload Video</span>
+                  </button>
+                )}
               </>
             ) : (
               <div className="p-3 bg-gradient-to-br from-indigo-50/80 to-purple-50/60 border border-indigo-100/80 rounded-2xl space-y-2">

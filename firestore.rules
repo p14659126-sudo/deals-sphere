@@ -59,7 +59,7 @@ service cloud.firestore {
       allow read: if true;
       allow create: if isSignedIn() && isValidId(channelId) && (
         request.resource.data.ownerId == request.auth.uid
-      ) && !exists(/databases/$(database)/documents/user_channels/$(request.auth.uid));
+      );
       allow update: if isValidId(channelId) && (
         isAdmin() ||
         (isSignedIn() && resource.data.ownerId == request.auth.uid && request.resource.data.ownerId == resource.data.ownerId) ||
@@ -86,6 +86,23 @@ service cloud.firestore {
       );
       allow delete: if isValidId(productId) && (
         isAdmin() || (isSignedIn() && (resource.data.sellerId == request.auth.uid || resource.data.ownerId == request.auth.uid))
+      );
+    }
+
+    // Videos Collection (Public browse, authenticated channel owner create/update/delete, admin moderate)
+    match /videos/{videoId} {
+      allow read: if true;
+      allow create: if isSignedIn() && isValidId(videoId) && (
+        request.resource.data.ownerId == request.auth.uid
+      );
+      allow update: if isValidId(videoId) && (
+        isAdmin() ||
+        (isSignedIn() && resource.data.ownerId == request.auth.uid) ||
+        // Allow public views and likes increment
+        (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['views', 'likes']))
+      );
+      allow delete: if isValidId(videoId) && (
+        isAdmin() || (isSignedIn() && resource.data.ownerId == request.auth.uid)
       );
     }
 

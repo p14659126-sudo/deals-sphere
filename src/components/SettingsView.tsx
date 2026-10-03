@@ -25,7 +25,9 @@ import {
   ChevronRight,
   Plus,
   ArrowUpRight,
-  Eye
+  Eye,
+  Megaphone,
+  Award
 } from 'lucide-react';
 import { attachAffiliateTag, normalizeProductLink } from '../utils/url';
 import { auth } from '../firebase';
@@ -48,6 +50,7 @@ interface Props {
   onClearCart: () => void;
   orders: OrderRecord[];
   cartItems: CartItem[];
+  onTestRewardedAd?: () => void;
 }
 
 export const SettingsView: React.FC<Props> = ({
@@ -68,6 +71,7 @@ export const SettingsView: React.FC<Props> = ({
   onClearCart,
   orders,
   cartItems,
+  onTestRewardedAd,
 }) => {
   const [businessNameInput, setBusinessNameInput] = useState(
     currentUser?.businessName || (currentUser ? `${currentUser.name}'s Store` : '')
@@ -529,7 +533,94 @@ export const SettingsView: React.FC<Props> = ({
         </div>
       </div>
 
-      {/* 7. Functional Setting: Data Management & Backup */}
+      {/* 7. Google AdMob Ads & Monetization Settings */}
+      <div className="bg-white rounded-3xl border border-slate-200/90 shadow-sm p-5 sm:p-6 space-y-4">
+        <div className="flex items-start justify-between gap-4">
+          <div className="flex items-start gap-3">
+            <div className="w-9 h-9 rounded-xl bg-amber-50 text-amber-600 border border-amber-200 flex items-center justify-center shrink-0">
+              <Award className="w-5 h-5" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h3 className="font-semibold text-sm text-slate-900">
+                  Ad Monetization & Publisher Tags
+                </h3>
+                <span className="text-[10px] font-bold bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full uppercase tracking-wider">
+                  Verified Publisher Active
+                </span>
+              </div>
+              <p className="text-xs text-slate-500 mt-0.5">
+                Publisher and verification code <code className="text-indigo-600 font-bold">ddcf7d341d3bffc2ba9a47de625c49cf697a5587</code> configured for banner and rewarded placements
+              </p>
+            </div>
+          </div>
+
+          <label className="relative inline-flex items-center cursor-pointer shrink-0 mt-1">
+            <input
+              type="checkbox"
+              checked={settings.rewardedAdOnSave !== false}
+              onChange={(e) => onUpdateSettings({ rewardedAdOnSave: e.target.checked })}
+              className="sr-only peer"
+            />
+            <div className="w-9 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-indigo-600"></div>
+          </label>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+          {/* Banner Ad Unit Box */}
+          <div className="p-3.5 rounded-2xl border border-slate-200 bg-slate-50/70 text-left space-y-1.5">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                <Megaphone className="w-3.5 h-3.5 text-indigo-600" />
+                <span>Responsive Banner Ad</span>
+              </span>
+              <span className="text-[10px] font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.2 rounded">
+                Active Code
+              </span>
+            </div>
+            <p className="text-[11px] text-slate-500">
+              Placements in Header, Home Feed & Product Details
+            </p>
+            <div className="text-[11px] font-mono bg-white p-1.5 rounded-lg border border-slate-200/90 text-indigo-950 font-bold truncate select-all">
+              ddcf7d341d3bffc2ba9a47de625c49cf697a5587
+            </div>
+          </div>
+
+          {/* Rewarded Ad Unit Box */}
+          <div className="p-3.5 rounded-2xl border border-indigo-200/80 bg-indigo-50/40 text-left space-y-1.5">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold text-indigo-950 flex items-center gap-1.5">
+                <Sparkles className="w-3.5 h-3.5 text-amber-500" />
+                <span>Rewarded Ad Unit (Save Option)</span>
+              </span>
+              <span className="text-[10px] font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.2 rounded">
+                Active Code
+              </span>
+            </div>
+            <p className="text-[11px] text-slate-500">
+              Triggered with verified reward credit when user saves deals
+            </p>
+            <div className="text-[11px] font-mono bg-white p-1.5 rounded-lg border border-indigo-200/90 text-indigo-950 font-bold truncate select-all">
+              ddcf7d341d3bffc2ba9a47de625c49cf697a5587
+            </div>
+          </div>
+        </div>
+
+        {onTestRewardedAd && (
+          <div className="pt-1 flex justify-end">
+            <button
+              type="button"
+              onClick={onTestRewardedAd}
+              className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-bold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 rounded-full transition-colors active:scale-98"
+            >
+              <Sparkles className="w-3.5 h-3.5 text-amber-500" />
+              <span>Test Ad Unit (ddcf7d341d3bffc2ba9a47de625c49cf697a5587)</span>
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* 8. Functional Setting: Data Management & Backup */}
       <div className="bg-white rounded-3xl border border-slate-200/90 shadow-sm p-5 sm:p-6 space-y-4">
         <div className="flex items-start gap-3">
           <div className="w-9 h-9 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center shrink-0">

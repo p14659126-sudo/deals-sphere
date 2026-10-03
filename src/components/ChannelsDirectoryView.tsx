@@ -44,8 +44,8 @@ export const ChannelsDirectoryView: React.FC<Props> = ({
       const q = searchQuery.toLowerCase();
       return (
         c.name.toLowerCase().includes(q) ||
-        c.handle.toLowerCase().includes(q) ||
-        c.bio.toLowerCase().includes(q) ||
+        (c.handle || c.username || '').toLowerCase().includes(q) ||
+        (c.bio || c.description || '').toLowerCase().includes(q) ||
         c.category.toLowerCase().includes(q)
       );
     }
@@ -209,7 +209,7 @@ export const ChannelsDirectoryView: React.FC<Props> = ({
                       </div>
 
                       <div className="text-[11px] text-slate-500 font-medium">
-                        {chan.handle} · <span className="font-semibold text-slate-800">{formatSocialCount(chan.followerCount)} followers</span>
+                        {chan.handle || chan.username} · <span className="font-semibold text-slate-800">{formatSocialCount(chan.followerCount ?? chan.followersCount ?? 0)} followers</span>
                       </div>
 
                       <p className="text-xs text-slate-600 line-clamp-2 pt-1 leading-relaxed">

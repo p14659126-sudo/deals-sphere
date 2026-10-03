@@ -1,5 +1,18 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { MarketProduct, UserAccount, CartItem, OrderRecord, AccountType, AppSettings, Channel, ReportRecord, ProductStatus } from './types';
+import { 
+  MarketProduct, 
+  UserAccount, 
+  CartItem, 
+  OrderRecord, 
+  AccountType, 
+  AppSettings, 
+  Channel, 
+  ReportRecord, 
+  ProductStatus,
+  ChannelVideo,
+  SubscriptionPlan,
+  PLAN_LIMITS
+} from './types';
 import { auth, db, signOutFirebase, OperationType, handleFirestoreError } from './firebase';
 import { onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
 import { 
@@ -30,9 +43,15 @@ import { ChannelDashboardView } from './components/ChannelDashboardView';
 import { ChannelDiscoveryView } from './components/ChannelDiscoveryView';
 import { AdminDashboardView } from './components/AdminDashboardView';
 import { ReportModal } from './components/ReportModal';
+import { VideoPlayerModal } from './components/VideoPlayerModal';
+import { UploadVideoModal } from './components/UploadVideoModal';
+import { EditChannelModal } from './components/EditChannelModal';
+import { AdBanner, ACTIVE_AD_CODE } from './components/AdBanner';
+import { RewardedAdModal, REWARDED_TEST_AD_UNIT_ID } from './components/RewardedAdModal';
 import { normalizeProductLink, openExternalLink, attachAffiliateTag, getDomainFromUrl } from './utils/url';
 import { sanitizeDisplayName } from './utils/privacy';
-import { recordProductView, recordProductClick } from './services/channelService';
+import { recordProductView, recordProductClick, createChannel, getChannelsByOwner } from './services/channelService';
+import { getProductStoreGroup, getStoreGroupConfig, StoreGroup, STORE_GROUPS } from './utils/merchant';
 import { 
   Sparkles, 
   ShoppingBag, 
@@ -60,6 +79,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   appendTrackingTag: true,
   viewMode: 'grid',
   verifyPurchasePrompt: true,
+  rewardedAdOnSave: true,
 };
 
 export default function App() {
@@ -208,7 +228,30 @@ export default function App() {
   // Search & Filter State
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('all');
+  const [selectedStoreGroup, setSelectedStoreGroup] = useState<string>('all');
+  const [viewByStoreGroup, setViewByStoreGroup] = useState<boolean>(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+
+  // Videos State (YouTube-style channel videos)
+  const [videos, setVideos] = useState<ChannelVideo[]>(() => {
+    try {
+      const stored = localStorage.getItem('ds_videos_cache');
+      return stored ? JSON.parse(stored) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  // Selected video for YouTube-style Video Player Modal
+  const [selectedVideo, setSelectedVideo] = useState<ChannelVideo | null>(null);
+  const [isVideoPlayerOpen, setIsVideoPlayerOpen] = useState(false);
+
+  // Video Upload & Edit Modal
+  const [isUploadVideoOpen, setIsUploadVideoOpen] = useState(false);
+  const [editingVideo, setEditingVideo] = useState<ChannelVideo | null>(null);
+
+  // Channel Customization Modal
+  const [isEditChannelOpen, setIsEditChannelOpen] = useState(false);
 
   // Modals State
   const [isUploadOpen, setIsUploadOpen] = useState(false);
@@ -227,6 +270,10 @@ export default function App() {
     targetId: '',
     targetTitle: '',
   });
+
+  // Google AdMob Rewarded Ad State (for Save Option)
+  const [rewardedAdProduct, setRewardedAdProduct] = useState<MarketProduct | null>(null);
+  const [isRewardedAdOpen, setIsRewardedAdOpen] = useState(false);
 
   const [authModalConfig, setAuthModalConfig] = useState<{
     isOpen: boolean;
@@ -280,12 +327,12 @@ export default function App() {
       let targetUsername: string | null = null;
 
       if (pathname.startsWith('/channel/')) {
-        targetUsername = pathname.replace('/channel/', '').split('/')[0]?.trim().toLowerCase();
+        targetUsername = pathname.replace('/channel/', '').split('/')[0]?.trim().toLowerCase().replace(/^@/, '');
       } else if (hash.startsWith('#/channel/')) {
-        targetUsername = hash.replace('#/channel/', '').split('/')[0]?.trim().toLowerCase();
+        targetUsername = hash.replace('#/channel/', '').split('/')[0]?.trim().toLowerCase().replace(/^@/, '');
       } else if (search.includes('channel=')) {
         const params = new URLSearchParams(search);
-        targetUsername = params.get('channel')?.trim().toLowerCase() || null;
+        targetUsername = params.get('channel')?.trim().toLowerCase().replace(/^@/, '') || null;
       }
 
       if (targetUsername) {
@@ -511,6 +558,158 @@ export default function App() {
     return () => window.removeEventListener('popstate', onPop);
   }, [channels, handleUrlRouting]);
 
+  // Sync Videos from Firestore in Real-Time
+  useEffect(() => {
+    try {
+      const videosRef = collection(db, 'videos');
+      const unsubscribe = onSnapshot(
+        videosRef,
+        (snapshot) => {
+          const list: ChannelVideo[] = [];
+          snapshot.forEach((d) => {
+            const data = d.data() as ChannelVideo;
+            if (data && data.id) list.push(data);
+          });
+          setVideos(list);
+          try {
+            localStorage.setItem('ds_videos_cache', JSON.stringify(list));
+          } catch {}
+        },
+        (error) => {
+          handleFirestoreError(error, OperationType.LIST, 'videos');
+        }
+      );
+      return () => unsubscribe();
+    } catch (err) {}
+  }, []);
+
+  // Auto-associate personal channel for logged-in users (Requirement #1: "Every logged-in user should have a personal channel automatically associated with their account.")
+  const autoChannelInProgressRef = useRef(false);
+  const autoChannelAttemptedForUserRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!currentUser || authLoading) return;
+
+    const userOwned = channels.filter((c) => c.ownerId === currentUser.id);
+    if (userOwned.length > 0) {
+      if (!dashboardChannel) {
+        setDashboardChannel(userOwned[0]);
+      }
+      return;
+    }
+
+    // Guard against repeated calls for the same user
+    if (autoChannelInProgressRef.current || autoChannelAttemptedForUserRef.current === currentUser.id) {
+      return;
+    }
+
+    autoChannelInProgressRef.current = true;
+    autoChannelAttemptedForUserRef.current = currentUser.id;
+
+    // Check if channel already exists in backend/storage
+    getChannelsByOwner(currentUser.id)
+      .then((existingList) => {
+        if (existingList.length > 0) {
+          const existing = existingList[0];
+          setChannels((prev) => {
+            if (prev.some((c) => c.id === existing.id)) return prev;
+            return [existing, ...prev];
+          });
+          setDashboardChannel(existing);
+          autoChannelInProgressRef.current = false;
+          return;
+        }
+
+        // None exists yet, create one
+        const cleanName = currentUser.name || 'Creator';
+        const baseUsername = cleanName.toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 15) || 'creator';
+        let uniqueUsername = baseUsername;
+        let counter = 1;
+        while (channels.some((c) => c.username.toLowerCase() === uniqueUsername.toLowerCase())) {
+          uniqueUsername = `${baseUsername}${counter++}`;
+        }
+
+        createChannel({
+          ownerId: currentUser.id,
+          name: `${cleanName}'s Store`,
+          username: uniqueUsername,
+          description: `Welcome to @${uniqueUsername} on Deal Sphere! Discover hand-picked product deals, verified tech reviews, and direct merchant discounts.`,
+          tagline: 'Curated Deals & Verified Finds',
+          logo: currentUser.avatar || `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(cleanName)}`,
+          banner: 'https://images.unsplash.com/photo-1607082348824-0a96f2a4b9da?w=1400&auto=format&fit=crop&q=80',
+          category: 'General Deals & Tech',
+          channelType: 'Creator',
+          country: 'India',
+          language: 'English',
+          contactEmail: currentUser.email,
+          status: 'active',
+        })
+          .then((newCh) => {
+            setChannels((prev) => {
+              if (prev.some((c) => c.id === newCh.id)) return prev;
+              return [newCh, ...prev];
+            });
+            setDashboardChannel(newCh);
+          })
+          .catch(() => {})
+          .finally(() => {
+            autoChannelInProgressRef.current = false;
+          });
+      })
+      .catch(() => {
+        autoChannelInProgressRef.current = false;
+      });
+  }, [currentUser, authLoading, channels.length]);
+
+  // Open User's Own Channel (Requirement #1: "The first channel option in the account menu should be: My Channel")
+  const handleOpenMyChannel = () => {
+    if (!currentUser) {
+      openSignIn('general', 'Open My Channel', () => handleOpenMyChannel());
+      return;
+    }
+    const myChannel = userChannels[0];
+    if (myChannel) {
+      handleOpenChannelProfile(myChannel);
+    } else {
+      handleOpenCreateChannel();
+    }
+  };
+
+  // Switch Plan Tier (Requirement #11)
+  const handleUpdateUserPlan = (plan: SubscriptionPlan) => {
+    if (!currentUser) return;
+    const updated: UserAccount = {
+      ...currentUser,
+      subscriptionPlan: plan,
+    };
+    setCurrentUser(updated);
+    currentUserRef.current = updated;
+    localStorage.setItem('affiliate_current_user', JSON.stringify(updated));
+    showToast(`Switched account plan to ${PLAN_LIMITS[plan].name}!`);
+  };
+
+  // Duplicate Product (Requirement #10)
+  const handleDuplicateProduct = (product: MarketProduct) => {
+    const clone: MarketProduct = {
+      ...product,
+      id: `prod_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      title: `${product.title} (Copy)`,
+      status: 'draft',
+      createdAt: new Date().toISOString(),
+      views: 0,
+      clicks: 0,
+    };
+    handleAddProduct(clone);
+  };
+
+  // Archive Product (Requirement #10)
+  const handleArchiveProduct = async (productId: string) => {
+    const target = products.find((p) => p.id === productId);
+    if (!target) return;
+    const newStatus = target.status === 'archived' ? 'published' : 'archived';
+    await handleUpdateProduct({ ...target, status: newStatus });
+  };
+
   // Save user-scoped cart
   useEffect(() => {
     if (currentUser) {
@@ -703,6 +902,21 @@ export default function App() {
     }
   };
 
+  // Open Video in YouTube-style Video Player
+  const handleSelectVideo = (video: ChannelVideo) => {
+    setSelectedVideo(video);
+    setIsVideoPlayerOpen(true);
+  };
+
+  // Delete Video
+  const handleVideoDeleted = async (videoId: string) => {
+    setVideos((prev) => prev.filter((v) => v.id !== videoId));
+    showToast('Video removed from channel.');
+    try {
+      await deleteDoc(doc(db, 'videos', videoId));
+    } catch (err) {}
+  };
+
   // Open Product Details (records view)
   const handleOpenProduct = (product: MarketProduct) => {
     setSelectedProduct(product);
@@ -710,12 +924,8 @@ export default function App() {
     recordProductView(product, currentUser?.id);
   };
 
-  // Add to Cart
-  const handleAddToCart = (product: MarketProduct) => {
-    if (!requireAuthForAction('save', product.title, () => handleAddToCart(product))) {
-      return;
-    }
-
+  // Purely execute adding product to cart
+  const executeAddToCart = (product: MarketProduct) => {
     setCartItems((prev) => {
       const existing = prev.find((item) => item.product.id === product.id);
       if (existing) {
@@ -733,7 +943,21 @@ export default function App() {
       ];
     });
 
-    showToast(`Saved "${product.title.slice(0, 24)}..." to cart.`);
+    showToast(`✨ Reward granted! Saved "${product.title.slice(0, 24)}..." to cart.`);
+  };
+
+  // Add to Cart / Save Option - triggers Google AdMob Rewarded Ad (ca-app-pub-3940256099942544/5224354917)
+  const handleAddToCart = (product: MarketProduct) => {
+    if (!requireAuthForAction('save', product.title, () => handleAddToCart(product))) {
+      return;
+    }
+
+    if (settings.rewardedAdOnSave !== false) {
+      setRewardedAdProduct(product);
+      setIsRewardedAdOpen(true);
+    } else {
+      executeAddToCart(product);
+    }
   };
 
   // Update Cart Quantity
@@ -831,11 +1055,25 @@ export default function App() {
     return products.filter((p) => !p.status || p.status === 'published');
   }, [products]);
 
-  // Filtered by Search & Category
+  // Store Group Breakdown
+  const storeGroupsBreakdown = useMemo(() => {
+    const counts: Record<string, number> = {};
+    publicProducts.forEach((p) => {
+      const g = getProductStoreGroup(p);
+      counts[g] = (counts[g] || 0) + 1;
+    });
+    return counts;
+  }, [publicProducts]);
+
+  // Filtered by Search, Category & Store Group
   const filteredProducts = useMemo(() => {
     return publicProducts.filter((p) => {
       if (selectedCategory !== 'all' && p.category.toLowerCase() !== selectedCategory.toLowerCase()) {
         return false;
+      }
+      if (selectedStoreGroup !== 'all') {
+        const group = getProductStoreGroup(p);
+        if (group !== selectedStoreGroup) return false;
       }
       if (searchQuery.trim()) {
         const q = searchQuery.toLowerCase();
@@ -843,12 +1081,29 @@ export default function App() {
         const matchDesc = p.description.toLowerCase().includes(q);
         const matchSeller = p.sellerName.toLowerCase().includes(q);
         const matchCat = p.category.toLowerCase().includes(q);
+        const matchMerchant = (p.merchant || '').toLowerCase().includes(q);
         const matchChannel = (p.channelUsername || '').toLowerCase().includes(q);
-        if (!matchTitle && !matchDesc && !matchSeller && !matchCat && !matchChannel) return false;
+        const matchBrand = (p.brand || '').toLowerCase().includes(q);
+        const matchType = (p.productType || '').toLowerCase().includes(q);
+        const matchKeywords = (p.keywords || []).some((kw) => kw.toLowerCase().includes(q));
+        if (!matchTitle && !matchDesc && !matchSeller && !matchCat && !matchMerchant && !matchChannel && !matchBrand && !matchType && !matchKeywords) {
+          return false;
+        }
       }
       return true;
     });
-  }, [publicProducts, selectedCategory, searchQuery]);
+  }, [publicProducts, selectedCategory, selectedStoreGroup, searchQuery]);
+
+  // Products clustered into store groups (for divided view mode)
+  const productsByStoreGroup = useMemo(() => {
+    const groups: Record<string, MarketProduct[]> = {};
+    filteredProducts.forEach((p) => {
+      const g = getProductStoreGroup(p);
+      if (!groups[g]) groups[g] = [];
+      groups[g].push(p);
+    });
+    return groups;
+  }, [filteredProducts]);
 
   const availableCategories = useMemo(() => {
     const cats = new Set<string>();
@@ -898,6 +1153,16 @@ export default function App() {
             setIsChannelModalOpen(true);
           }
         }}
+        onOpenUploadVideo={() => {
+          if (!currentUser) {
+            openSignIn('general', 'Sign in to upload videos', () => setIsUploadVideoOpen(true));
+          } else {
+            setEditingVideo(null);
+            setIsUploadVideoOpen(true);
+          }
+        }}
+        onOpenMyChannel={handleOpenMyChannel}
+        userChannel={userChannels[0] || null}
         onOpenSignIn={() => openSignIn('general')}
         onOpenSignUp={() => openSignUp('general')}
         onSignOut={handleSignOut}
@@ -905,6 +1170,9 @@ export default function App() {
         hasChannel={userChannels.length > 0}
         isAdmin={isAdmin}
       />
+
+      {/* Active Ad Banner with verification publisher code */}
+      <AdBanner placement="header" adUnitId={ACTIVE_AD_CODE} />
 
       {/* Main Body */}
       <div className="flex-1 flex w-full max-w-[1600px] mx-auto">
@@ -931,6 +1199,14 @@ export default function App() {
               setIsUploadOpen(true);
             }
           }}
+          onOpenUploadVideo={() => {
+            if (!currentUser) {
+              openSignIn('general', 'Sign in to upload videos', () => setIsUploadVideoOpen(true));
+            } else {
+              setEditingVideo(null);
+              setIsUploadVideoOpen(true);
+            }
+          }}
           onOpenCreateChannel={() => {
             if (!currentUser) {
               openSignIn('general', 'Create a channel', () => setIsChannelModalOpen(true));
@@ -938,6 +1214,7 @@ export default function App() {
               setIsChannelModalOpen(true);
             }
           }}
+          onOpenMyChannel={handleOpenMyChannel}
           onOpenSignIn={() => openSignIn('general')}
           onOpenSignUp={() => openSignUp('general')}
           onSignOut={handleSignOut}
@@ -970,10 +1247,11 @@ export default function App() {
               }}
             />
           ) : activeChannelProfile ? (
-            /* 2. PUBLIC CHANNEL PROFILE VIEW (/channel/:username) */
+            /* 2. PUBLIC CHANNEL PROFILE VIEW (/channel/:username or /channel/@handle) */
             <ChannelProfileView
               channel={activeChannelProfile}
               products={products}
+              videos={videos}
               currentUser={currentUser}
               onBack={() => {
                 setActiveChannelProfile(null);
@@ -984,6 +1262,11 @@ export default function App() {
               onSelectProduct={handleOpenProduct}
               onAddToCart={handleAddToCart}
               onBuyNow={handleBuyNow}
+              onSelectVideo={handleSelectVideo}
+              onOpenUploadVideo={() => {
+                setEditingVideo(null);
+                setIsUploadVideoOpen(true);
+              }}
               onOpenDashboard={() => {
                 setDashboardChannel(activeChannelProfile);
                 setActiveChannelProfile(null);
@@ -993,6 +1276,7 @@ export default function App() {
                 setEditingProduct(null);
                 setIsUploadOpen(true);
               }}
+              onOpenEditChannel={() => setIsEditChannelOpen(true)}
               onOpenReport={(type, id, title) => {
                 setReportModalConfig({
                   isOpen: true,
@@ -1025,13 +1309,14 @@ export default function App() {
               onShowToast={showToast}
             />
           ) : activeTab === 'dashboard' ? (
-            /* 4. SELLER DASHBOARD VIEW */
+            /* 4. CREATOR STUDIO DASHBOARD VIEW */
             currentUser ? (
               <ChannelDashboardView
                 userChannels={userChannels}
                 selectedChannel={dashboardChannel}
                 onSelectChannel={setDashboardChannel}
                 products={products}
+                videos={videos}
                 currentUser={currentUser}
                 onOpenAddProduct={() => {
                   setEditingProduct(null);
@@ -1042,8 +1327,24 @@ export default function App() {
                   setIsUploadOpen(true);
                 }}
                 onDeleteProduct={handleDeleteProduct}
+                onDuplicateProduct={handleDuplicateProduct}
+                onArchiveProduct={handleArchiveProduct}
+                onOpenUploadVideo={() => {
+                  setEditingVideo(null);
+                  setIsUploadVideoOpen(true);
+                }}
+                onEditVideo={(vid) => {
+                  setEditingVideo(vid);
+                  setIsUploadVideoOpen(true);
+                }}
+                onDeleteVideo={handleVideoDeleted}
+                onSelectVideo={handleSelectVideo}
                 onOpenCreateChannel={() => setIsChannelModalOpen(true)}
                 onOpenChannelProfile={handleOpenChannelProfile}
+                onSelectProduct={handleOpenProduct}
+                onUpdateProduct={handleUpdateProduct}
+                onUpdateUserPlan={handleUpdateUserPlan}
+                onDeleteChannel={handleDeleteChannel}
                 onShowToast={showToast}
               />
             ) : (
@@ -1128,6 +1429,27 @@ export default function App() {
               onClearCart={handleClearCart}
               orders={orders}
               cartItems={cartItems}
+              onTestRewardedAd={() => {
+                const sample = products[0] || {
+                  id: 'test-deal-sample',
+                  sellerId: 'demo',
+                  sellerName: 'Deal Sphere Demo Store',
+                  title: 'Sony WH-1000XM5 Wireless Noise Canceling Headphones',
+                  price: 24990,
+                  originalPrice: 34990,
+                  currency: settings.currency || '₹',
+                  productLink: 'https://amazon.in',
+                  imageUrl: 'https://images.unsplash.com/photo-1505740420928-5e560c06d30e?w=800&q=80',
+                  category: 'Electronics',
+                  rating: 4.8,
+                  reviewCount: 320,
+                  inStock: true,
+                  freeDelivery: true,
+                  createdAt: new Date().toISOString(),
+                };
+                setRewardedAdProduct(sample);
+                setIsRewardedAdOpen(true);
+              }}
             />
           ) : activeTab === 'cart' ? (
             /* 7. CART VIEW */
@@ -1188,9 +1510,10 @@ export default function App() {
                   <button
                     onClick={() => {
                       if (!currentUser) {
-                        openSignIn('general', 'Create a channel', () => setIsChannelModalOpen(true));
-                      } else if (userChannels.length === 0) {
-                        setIsChannelModalOpen(true);
+                        openSignIn('general', 'Add a product to your channel', () => {
+                          setEditingProduct(null);
+                          setIsUploadOpen(true);
+                        });
                       } else {
                         setEditingProduct(null);
                         setIsUploadOpen(true);
@@ -1199,7 +1522,7 @@ export default function App() {
                     className="inline-flex items-center gap-1.5 px-4 py-1.5 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-full shadow-xs shadow-indigo-100 transition-all active:scale-[0.98]"
                   >
                     <Plus className="w-3.5 h-3.5" />
-                    <span>{userChannels.length === 0 ? 'Create Channel' : 'Add Product'}</span>
+                    <span>Add Product</span>
                   </button>
                 </div>
               </div>
@@ -1241,6 +1564,72 @@ export default function App() {
                 </div>
               )}
 
+              {/* STORE / PLATFORM GROUPS FILTER & DIVISION BAR */}
+              <div className="bg-slate-50/80 border border-slate-200/90 rounded-2xl p-3 sm:p-4 space-y-3">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                      <Store className="w-4 h-4 text-indigo-600" />
+                      <span>Divide by Store / Platform:</span>
+                    </span>
+                    <span className="text-[11px] text-slate-500 hidden sm:inline">
+                      (Filtered by product links: Amazon, Flipkart, Meesho, etc.)
+                    </span>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setViewByStoreGroup(!viewByStoreGroup)}
+                      className={`inline-flex items-center gap-1.5 px-3 py-1 text-xs font-semibold rounded-full border transition-all ${
+                        viewByStoreGroup
+                          ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs'
+                          : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100'
+                      }`}
+                    >
+                      <Layers className="w-3.5 h-3.5" />
+                      <span>{viewByStoreGroup ? 'Divided by Stores ON' : 'Divide into Store Groups'}</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Store Platform Group Pills */}
+                <div className="flex items-center gap-2 overflow-x-auto pb-1">
+                  <button
+                    onClick={() => setSelectedStoreGroup('all')}
+                    className={`px-3 py-1 text-xs rounded-full border transition-all whitespace-nowrap font-medium flex items-center gap-1 ${
+                      selectedStoreGroup === 'all'
+                        ? 'bg-slate-900 text-white border-slate-900 font-bold shadow-xs'
+                        : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100'
+                    }`}
+                  >
+                    <span>All Stores</span>
+                    <span className="text-[10px] opacity-75 font-tabular">({publicProducts.length})</span>
+                  </button>
+
+                  {(['Amazon', 'Flipkart', 'Meesho', 'Myntra', 'Ajio', 'Other'] as StoreGroup[]).map((groupName) => {
+                    const cfg = getStoreGroupConfig(groupName);
+                    const count = storeGroupsBreakdown[groupName] || 0;
+                    const isSelected = selectedStoreGroup === groupName;
+                    return (
+                      <button
+                        key={groupName}
+                        onClick={() => setSelectedStoreGroup(isSelected ? 'all' : groupName)}
+                        className={`px-3 py-1 text-xs rounded-full border transition-all whitespace-nowrap font-medium flex items-center gap-1.5 ${
+                          isSelected
+                            ? `${cfg.badgeClass} ring-2 ring-indigo-200 font-bold shadow-xs`
+                            : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                        }`}
+                      >
+                        <span>{cfg.icon}</span>
+                        <span>{cfg.badgeLabel}</span>
+                        <span className="text-[10px] font-tabular opacity-75">({count})</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
               {/* Categories Filter Pills */}
               {availableCategories.length > 1 && (
                 <div className="flex items-center gap-2 overflow-x-auto pb-1">
@@ -1258,7 +1647,7 @@ export default function App() {
                           : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
                       }`}
                     >
-                      {cat === 'all' ? 'All Products' : cat}
+                      {cat === 'all' ? 'All Categories' : cat}
                     </button>
                   ))}
                 </div>
@@ -1273,43 +1662,131 @@ export default function App() {
 
                   <div className="space-y-1.5">
                     <h2 className="font-display font-bold text-xl text-slate-900">
-                      No Products Listed Yet
+                      No Products Found
                     </h2>
                     <p className="text-xs text-slate-500 leading-relaxed">
-                      Be the first seller to create a channel and publish products with verified links.
+                      {selectedStoreGroup !== 'all' 
+                        ? `No products currently listed from ${selectedStoreGroup}. Add a link to list one!`
+                        : 'Be the first seller to create a channel and publish products with verified links.'}
                     </p>
                   </div>
 
-                  <button
-                    onClick={() => {
-                      if (!currentUser) {
-                        openSignIn('general', 'Create your channel', () => setIsChannelModalOpen(true));
-                      } else if (userChannels.length === 0) {
-                        setIsChannelModalOpen(true);
-                      } else {
-                        setEditingProduct(null);
-                        setIsUploadOpen(true);
-                      }
-                    }}
-                    className="inline-flex items-center gap-2 px-6 py-2.5 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-full shadow-sm shadow-indigo-100 transition-all active:scale-[0.98]"
-                  >
-                    <Plus className="w-4 h-4" />
-                    <span>{userChannels.length === 0 ? 'Create Channel' : 'List First Product'}</span>
-                  </button>
+                  <div className="flex items-center justify-center gap-2">
+                    {selectedStoreGroup !== 'all' && (
+                      <button
+                        onClick={() => setSelectedStoreGroup('all')}
+                        className="px-4 py-2 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-full transition-colors"
+                      >
+                        Clear Store Filter
+                      </button>
+                    )}
+                    <button
+                      onClick={() => {
+                        if (!currentUser) {
+                          openSignIn('general', 'Add a product to your channel', () => {
+                            setEditingProduct(null);
+                            setIsUploadOpen(true);
+                          });
+                        } else {
+                          setEditingProduct(null);
+                          setIsUploadOpen(true);
+                        }
+                      }}
+                      className="inline-flex items-center gap-2 px-6 py-2 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-full shadow-sm shadow-indigo-100 transition-all active:scale-[0.98]"
+                    >
+                      <Plus className="w-4 h-4" />
+                      <span>Add Product</span>
+                    </button>
+                  </div>
+                </div>
+              ) : viewByStoreGroup ? (
+                /* DIVIDED BY STORE GROUPS VIEW */
+                <div className="space-y-10">
+                  {Object.entries(productsByStoreGroup).map(([groupName, groupItems]) => {
+                    const cfg = getStoreGroupConfig(groupName as StoreGroup);
+                    return (
+                      <div key={groupName} className="space-y-4">
+                        {/* Store Section Header */}
+                        <div className="flex items-center justify-between border-b border-slate-200/80 pb-3">
+                          <div className="flex items-center gap-2.5">
+                            <span className="text-xl">{cfg.icon}</span>
+                            <div>
+                              <h2 className="font-display font-bold text-base sm:text-lg text-slate-900 flex items-center gap-2">
+                                <span>Deals {cfg.badgeLabel}</span>
+                                <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full border ${cfg.badgeClass}`}>
+                                  {groupItems.length} {groupItems.length === 1 ? 'deal' : 'deals'}
+                                </span>
+                              </h2>
+                              <p className="text-[11px] text-slate-500">
+                                Curated products directly sourced from {cfg.displayName} links
+                              </p>
+                            </div>
+                          </div>
+
+                          <button
+                            onClick={() => {
+                              setSelectedStoreGroup(groupName);
+                              setViewByStoreGroup(false);
+                            }}
+                            className="text-xs font-semibold text-indigo-600 hover:text-indigo-800 transition-colors"
+                          >
+                            Focus this store &rarr;
+                          </button>
+                        </div>
+
+                        {/* Store Grid */}
+                        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 sm:gap-5">
+                          {groupItems.map((p) => (
+                            <AmazonProductCard
+                              key={p.id}
+                              product={p}
+                              viewMode={settings.viewMode}
+                              onSelectProduct={handleOpenProduct}
+                              onAddToCart={handleAddToCart}
+                              onBuyNow={handleBuyNow}
+                              onOpenChannel={handleOpenChannelProfile}
+                            />
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               ) : (
-                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 sm:gap-5">
-                  {filteredProducts.map((p) => (
-                    <AmazonProductCard
-                      key={p.id}
-                      product={p}
-                      viewMode={settings.viewMode}
-                      onSelectProduct={handleOpenProduct}
-                      onAddToCart={handleAddToCart}
-                      onBuyNow={handleBuyNow}
-                      onOpenChannel={handleOpenChannelProfile}
-                    />
-                  ))}
+                /* UNIFIED FEED VIEW */
+                <div className="space-y-6">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 sm:gap-5">
+                    {filteredProducts.slice(0, 4).map((p) => (
+                      <AmazonProductCard
+                        key={p.id}
+                        product={p}
+                        viewMode={settings.viewMode}
+                        onSelectProduct={handleOpenProduct}
+                        onAddToCart={handleAddToCart}
+                        onBuyNow={handleBuyNow}
+                        onOpenChannel={handleOpenChannelProfile}
+                      />
+                    ))}
+                  </div>
+
+                  {/* Mid-feed AdMob Banner Test Ad */}
+                  <AdBanner placement="feed" />
+
+                  {filteredProducts.length > 4 && (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 sm:gap-5">
+                      {filteredProducts.slice(4).map((p) => (
+                        <AmazonProductCard
+                          key={p.id}
+                          product={p}
+                          viewMode={settings.viewMode}
+                          onSelectProduct={handleOpenProduct}
+                          onAddToCart={handleAddToCart}
+                          onBuyNow={handleBuyNow}
+                          onOpenChannel={handleOpenChannelProfile}
+                        />
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -1357,6 +1834,7 @@ export default function App() {
           onAddProduct={handleAddProduct}
           onUpdateProduct={handleUpdateProduct}
           editingProduct={editingProduct}
+          totalUserProductsCount={products.filter((p) => p.sellerId === currentUser.id || p.ownerId === currentUser.id).length}
           onOpenCreateChannel={() => {
             setIsUploadOpen(false);
             setIsChannelModalOpen(true);
@@ -1396,6 +1874,80 @@ export default function App() {
         reporterId={currentUser?.id}
         reporterEmail={currentUser?.email}
       />
+
+      {/* 6. Google AdMob Rewarded Test Ad Modal (ca-app-pub-3940256099942544/5224354917) */}
+      <RewardedAdModal
+        isOpen={isRewardedAdOpen}
+        product={rewardedAdProduct}
+        onClose={() => {
+          setIsRewardedAdOpen(false);
+          setRewardedAdProduct(null);
+        }}
+        onRewardGranted={(product) => {
+          executeAddToCart(product);
+        }}
+        adUnitId={REWARDED_TEST_AD_UNIT_ID}
+      />
+
+      {/* 7. YouTube-style Video Player Modal */}
+      <VideoPlayerModal
+        video={selectedVideo}
+        isOpen={isVideoPlayerOpen}
+        onClose={() => {
+          setIsVideoPlayerOpen(false);
+          setSelectedVideo(null);
+        }}
+        products={products}
+        channel={channels.find((c) => c.id === selectedVideo?.channelId || c.username === selectedVideo?.channelUsername)}
+        currentUser={currentUser}
+        onSelectProduct={handleOpenProduct}
+        onBuyNow={handleBuyNow}
+        onOpenChannel={handleOpenChannelProfile}
+        onShowToast={showToast}
+      />
+
+      {/* 8. YouTube-style Video Upload & Edit Modal */}
+      {currentUser && (
+        <UploadVideoModal
+          isOpen={isUploadVideoOpen}
+          onClose={() => {
+            setIsUploadVideoOpen(false);
+            setEditingVideo(null);
+          }}
+          currentUser={currentUser}
+          currentChannel={userChannels[0] || null}
+          products={products.filter((p) => p.channelId === userChannels[0]?.id || p.sellerId === currentUser.id)}
+          editingVideo={editingVideo}
+          totalUserVideosCount={videos.filter((v) => v.ownerId === currentUser.id).length}
+          onVideoSaved={(saved) => {
+            setVideos((prev) => [saved, ...prev.filter((v) => v.id !== saved.id)]);
+          }}
+          onVideoDeleted={(delId) => {
+            setVideos((prev) => prev.filter((v) => v.id !== delId));
+          }}
+          onShowToast={showToast}
+        />
+      )}
+
+      {/* 9. Channel Customization / Edit Channel Modal */}
+      {currentUser && userChannels[0] && (
+        <EditChannelModal
+          isOpen={isEditChannelOpen}
+          onClose={() => setIsEditChannelOpen(false)}
+          channel={userChannels[0]}
+          currentUser={currentUser}
+          onChannelUpdated={(updatedCh) => {
+            setChannels((prev) => prev.map((c) => (c.id === updatedCh.id ? updatedCh : c)));
+            if (activeChannelProfile?.id === updatedCh.id) {
+              setActiveChannelProfile(updatedCh);
+            }
+            if (dashboardChannel?.id === updatedCh.id) {
+              setDashboardChannel(updatedCh);
+            }
+          }}
+          onShowToast={showToast}
+        />
+      )}
 
     </div>
   );

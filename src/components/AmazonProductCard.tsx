@@ -2,11 +2,13 @@ import React from 'react';
 import { MarketProduct } from '../types';
 import { Star, ShoppingBag, ExternalLink, ShieldCheck, Tag, ArrowUpRight, Store, Ticket, Percent } from 'lucide-react';
 import { getDomainFromUrl } from '../utils/url';
+import { getProductStoreGroup, getStoreGroupConfig } from '../utils/merchant';
 
 interface Props {
   product: MarketProduct;
   viewMode?: 'grid' | 'list';
-  onSelectProduct: (product: MarketProduct) => void;
+  onSelectProduct?: (product: MarketProduct) => void;
+  onSelect?: (product: MarketProduct) => void;
   onAddToCart: (product: MarketProduct) => void;
   onBuyNow: (product: MarketProduct) => void;
   onOpenChannel?: (channelUsername: string) => void;
@@ -16,10 +18,12 @@ export const AmazonProductCard: React.FC<Props> = ({
   product,
   viewMode = 'grid',
   onSelectProduct,
+  onSelect,
   onAddToCart,
   onBuyNow,
   onOpenChannel,
 }) => {
+  const handleSelect = onSelectProduct || onSelect || (() => {});
   const originalPrice = product.originalPrice || product.mrp || product.price;
   const discountPercent = originalPrice > product.price
     ? Math.round(((originalPrice - product.price) / originalPrice) * 100)
@@ -31,13 +35,16 @@ export const AmazonProductCard: React.FC<Props> = ({
 
   const destinationDomain = product.merchant || getDomainFromUrl(product.productLink);
 
+  const storeGroup = getProductStoreGroup(product);
+  const storeConfig = getStoreGroupConfig(storeGroup);
+
   return (
     <div className="bg-white rounded-2xl border border-slate-200/90 shadow-[0_2px_8px_rgba(0,0,0,0.04)] hover:shadow-[0_12px_28px_rgba(0,0,0,0.09)] hover:border-slate-300 transition-all duration-200 flex flex-col justify-between overflow-hidden group">
       
       {/* Clickable Image & Main Info Area */}
       <div 
         className="cursor-pointer"
-        onClick={() => onSelectProduct(product)}
+        onClick={() => handleSelect(product)}
       >
         {/* Product Image Frame */}
         <div className="relative w-full h-52 sm:h-56 bg-slate-50/50 flex items-center justify-center overflow-hidden border-b border-slate-100 p-4">
@@ -67,6 +74,12 @@ export const AmazonProductCard: React.FC<Props> = ({
 
           {/* Floating Badges */}
           <div className="absolute top-3 left-3 flex flex-col gap-1 items-start">
+            {/* Store Group Badge: e.g. from: Amazon / from: Flipkart / from: Meesho */}
+            <span className={`border text-[10px] font-bold px-2 py-0.5 rounded-full shadow-xs flex items-center gap-1 ${storeConfig.badgeClass}`}>
+              <span>{storeConfig.icon}</span>
+              <span>{storeConfig.badgeLabel}</span>
+            </span>
+
             {discountPercent > 0 && (
               <span className="bg-rose-50 border border-rose-200 text-rose-700 text-[10px] font-bold px-2 py-0.5 rounded-full shadow-xs flex items-center gap-0.5">
                 <Percent className="w-2.5 h-2.5" />

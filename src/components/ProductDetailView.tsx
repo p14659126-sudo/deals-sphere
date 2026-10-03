@@ -21,6 +21,8 @@ import {
   Video
 } from 'lucide-react';
 import { getDomainFromUrl, normalizeProductLink } from '../utils/url';
+import { getProductStoreGroup, getStoreGroupConfig } from '../utils/merchant';
+import { AdBanner, ACTIVE_AD_CODE } from './AdBanner';
 
 interface Props {
   product: MarketProduct;
@@ -45,6 +47,16 @@ export const ProductDetailView: React.FC<Props> = ({
   const [copiedCoupon, setCopiedCoupon] = useState(false);
   const [addedToast, setAddedToast] = useState(false);
   const [activeImageIndex, setActiveImageIndex] = useState(0);
+  const [viewingVideo, setViewingVideo] = useState(false);
+
+  const getEmbedVideoUrl = (url?: string): string | null => {
+    if (!url) return null;
+    const ytMatch = /(?:https?:\/\/)?(?:www\.)?(?:youtube\.com\/(?:watch\?v=|embed\/)|youtu\.be\/)([a-zA-Z0-9_-]{11})/i.exec(url);
+    if (ytMatch && ytMatch[1]) {
+      return `https://www.youtube.com/embed/${ytMatch[1]}`;
+    }
+    return null;
+  };
 
   const images = (product.images && product.images.length > 0)
     ? product.images.filter((img) => typeof img === 'string' && img.trim() !== '')
@@ -126,10 +138,30 @@ export const ProductDetailView: React.FC<Props> = ({
       {/* Main PDP Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 sm:gap-8 items-start">
         
-        {/* Left Column: Product Gallery */}
+        {/* Left Column: Product Gallery / Video */}
         <div className="lg:col-span-6 space-y-4">
-          <div className="bg-white rounded-3xl border border-slate-200/90 p-6 sm:p-8 flex items-center justify-center relative min-h-[380px] shadow-xs">
-            {currentDisplayImage ? (
+          <div className="bg-white rounded-3xl border border-slate-200/90 p-4 sm:p-6 flex items-center justify-center relative min-h-[380px] shadow-xs overflow-hidden">
+            {viewingVideo && product.videoUrl ? (
+              <div className="w-full h-full min-h-[340px] flex items-center justify-center bg-black rounded-2xl overflow-hidden aspect-video">
+                {getEmbedVideoUrl(product.videoUrl) ? (
+                  <iframe
+                    src={getEmbedVideoUrl(product.videoUrl)!}
+                    title={product.title}
+                    className="w-full h-full min-h-[340px]"
+                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                    allowFullScreen
+                  />
+                ) : (
+                  <video
+                    src={product.videoUrl}
+                    controls
+                    className="w-full h-full max-h-[360px] object-contain"
+                  >
+                    Your browser does not support the video tag.
+                  </video>
+                )}
+              </div>
+            ) : currentDisplayImage ? (
               <img
                 src={currentDisplayImage}
                 alt={product.title}
@@ -142,7 +174,7 @@ export const ProductDetailView: React.FC<Props> = ({
               </div>
             )}
 
-            {discountPercent > 0 && (
+            {discountPercent > 0 && !viewingVideo && (
               <span className="absolute top-4 left-4 bg-rose-50 border border-rose-200 text-rose-700 text-xs font-bold px-3 py-1 rounded-full shadow-xs flex items-center gap-1">
                 <Percent className="w-3 h-3" />
                 <span>{discountPercent}% OFF</span>
@@ -154,39 +186,63 @@ export const ProductDetailView: React.FC<Props> = ({
             </span>
           </div>
 
-          {/* Multiple Image Thumbnails */}
-          {images.length > 1 && (
-            <div className="flex items-center gap-2 overflow-x-auto pb-1">
-              {images.map((img, idx) => (
-                <button
-                  key={idx}
-                  onClick={() => setActiveImageIndex(idx)}
-                  className={`w-14 h-14 rounded-xl border-2 overflow-hidden bg-white p-1 shrink-0 transition-all ${
-                    activeImageIndex === idx ? 'border-indigo-600 shadow-xs' : 'border-slate-200 opacity-70 hover:opacity-100'
-                  }`}
-                >
-                  <img src={img} alt={`Thumbnail ${idx + 1}`} className="w-full h-full object-contain" />
-                </button>
-              ))}
-            </div>
-          )}
+          {/* Multiple Image Thumbnails and Video Tab */}
+          <div className="flex items-center gap-2 overflow-x-auto pb-1">
+            {images.map((img, idx) => (
+              <button
+                key={idx}
+                onClick={() => {
+                  setActiveImageIndex(idx);
+                  setViewingVideo(false);
+                }}
+                className={`w-14 h-14 rounded-xl border-2 overflow-hidden bg-white p-1 shrink-0 transition-all ${
+                  !viewingVideo && activeImageIndex === idx ? 'border-indigo-600 shadow-xs ring-2 ring-indigo-100' : 'border-slate-200 opacity-70 hover:opacity-100'
+                }`}
+              >
+                <img src={img} alt={`Thumbnail ${idx + 1}`} className="w-full h-full object-contain" />
+              </button>
+            ))}
+
+            {product.videoUrl && (
+              <button
+                onClick={() => setViewingVideo(true)}
+                className={`h-14 px-3 rounded-xl border-2 overflow-hidden flex items-center gap-1.5 shrink-0 text-xs font-bold transition-all ${
+                  viewingVideo 
+                    ? 'border-indigo-600 bg-indigo-50 text-indigo-700 ring-2 ring-indigo-100 shadow-xs' 
+                    : 'border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100'
+                }`}
+              >
+                <Video className="w-4 h-4 text-indigo-600" />
+                <span>Watch Video</span>
+              </button>
+            )}
+          </div>
 
           {/* Video Preview Link if available */}
           {product.videoUrl && (
             <div className="bg-slate-50 border border-slate-200 rounded-2xl p-3 flex items-center justify-between text-xs">
               <span className="flex items-center gap-1.5 font-semibold text-slate-700">
                 <Video className="w-4 h-4 text-indigo-600" />
-                <span>Product Video Preview</span>
+                <span>Product Video Available</span>
               </span>
-              <a
-                href={product.videoUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-indigo-600 hover:text-indigo-800 font-semibold inline-flex items-center gap-1"
-              >
-                <span>Watch Video</span>
-                <ArrowUpRight className="w-3.5 h-3.5" />
-              </a>
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => setViewingVideo(!viewingVideo)}
+                  className="text-indigo-600 hover:text-indigo-800 font-semibold"
+                >
+                  {viewingVideo ? 'View Photos' : 'Play Video Here'}
+                </button>
+                <a
+                  href={product.videoUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-slate-500 hover:text-slate-700 font-medium inline-flex items-center gap-1"
+                >
+                  <span>Open</span>
+                  <ArrowUpRight className="w-3.5 h-3.5" />
+                </a>
+              </div>
             </div>
           )}
         </div>
@@ -195,8 +251,19 @@ export const ProductDetailView: React.FC<Props> = ({
         <div className="lg:col-span-6 space-y-5">
           
           <div className="space-y-3">
-            {/* Merchant, Type & Verification Tags */}
+            {/* Merchant, Type, Store Group & Verification Tags */}
             <div className="flex items-center gap-2 flex-wrap text-xs">
+              {(() => {
+                const group = getProductStoreGroup(product);
+                const cfg = getStoreGroupConfig(group);
+                return (
+                  <span className={`inline-flex items-center gap-1 font-bold border px-2.5 py-0.5 rounded-full shadow-2xs ${cfg.badgeClass}`}>
+                    <span>{cfg.icon}</span>
+                    <span>{cfg.badgeLabel}</span>
+                  </span>
+                );
+              })()}
+
               <span className="inline-flex items-center gap-1 font-semibold text-slate-700 bg-slate-100 border border-slate-200 px-2.5 py-0.5 rounded-full">
                 <Store className="w-3.5 h-3.5 text-slate-500" />
                 <span>{domain}</span>
@@ -402,6 +469,9 @@ export const ProductDetailView: React.FC<Props> = ({
 
         </div>
       </div>
+
+      {/* Verified Ad Banner Placement on Product Details */}
+      <AdBanner placement="detail" adUnitId={ACTIVE_AD_CODE} />
     </div>
   );
 };

@@ -26,10 +26,13 @@ import {
   Instagram,
   Globe,
   Tag,
-  ArrowUpRight
+  ArrowUpRight,
+  Layers,
+  LayoutGrid
 } from 'lucide-react';
 import { formatSocialCount, getYouTubeEmbedUrl, detectVideoType } from '../utils/video';
 import { getDomainFromUrl } from '../utils/url';
+import { getProductStoreGroup, getStoreGroupConfig, StoreGroup } from '../utils/merchant';
 
 interface Props {
   channel: CreatorChannel;
@@ -74,6 +77,37 @@ export const ChannelView: React.FC<Props> = ({
       (p) => p.channelId === channel.id || p.sellerId === channel.ownerId
     );
   }, [products, channel.id, channel.ownerId]);
+
+  // Store group filter state & grouped view state
+  const [selectedStoreGroup, setSelectedStoreGroup] = useState<'all' | StoreGroup>('all');
+  const [groupByStore, setGroupByStore] = useState(false);
+
+  // Group counts for store breakdown
+  const storeGroupCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    channelProducts.forEach((p) => {
+      const g = getProductStoreGroup(p);
+      counts[g] = (counts[g] || 0) + 1;
+    });
+    return counts;
+  }, [channelProducts]);
+
+  // Filtered products for display
+  const displayedProducts = useMemo(() => {
+    if (selectedStoreGroup === 'all') return channelProducts;
+    return channelProducts.filter((p) => getProductStoreGroup(p) === selectedStoreGroup);
+  }, [channelProducts, selectedStoreGroup]);
+
+  // Products clustered into store groups (for divided view mode)
+  const groupedProducts = useMemo(() => {
+    const map: Record<string, MarketProduct[]> = {};
+    displayedProducts.forEach((p) => {
+      const g = getProductStoreGroup(p);
+      if (!map[g]) map[g] = [];
+      map[g].push(p);
+    });
+    return map;
+  }, [displayedProducts]);
 
   // Products with video
   const videoProducts = useMemo(() => {
@@ -195,10 +229,10 @@ export const ChannelView: React.FC<Props> = ({
                 </div>
 
                 <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500 font-medium">
-                  <span className="font-bold text-slate-800">{channel.handle}</span>
+                  <span className="font-bold text-slate-800">{channel.handle || channel.username}</span>
                   <span>·</span>
                   <span className="font-semibold text-slate-900">
-                    {formatSocialCount(channel.followerCount)} {channel.followerCount === 1 ? 'follower' : 'followers'}
+                    {formatSocialCount(channel.followerCount ?? channel.followersCount ?? 0)} {(channel.followerCount ?? channel.followersCount ?? 0) === 1 ? 'follower' : 'followers'}
                   </span>
                   <span>·</span>
                   <span>{channelProducts.length} {channelProducts.length === 1 ? 'deal' : 'deals'} listed</span>
@@ -457,24 +491,78 @@ export const ChannelView: React.FC<Props> = ({
             </div>
           ) : null}
 
-          {/* All Listings from this channel */}
+          {/* All Listings from this channel divided into store groups */}
           <div className="space-y-4">
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between flex-wrap gap-2">
               <h3 className="font-display font-bold text-base sm:text-lg text-slate-900 flex items-center gap-2">
-                <span>Latest Channel Listings</span>
+                <span>Channel Listings</span>
                 <span className="text-xs font-semibold text-slate-500">({channelProducts.length})</span>
               </h3>
 
-              {isOwner && (
-                <button
-                  onClick={onOpenUpload}
-                  className="inline-flex items-center gap-1 text-xs font-semibold text-indigo-600 hover:text-indigo-700"
-                >
-                  <Plus className="w-3.5 h-3.5" />
-                  <span>Add Product</span>
-                </button>
-              )}
+              <div className="flex items-center gap-2">
+                {channelProducts.length > 0 && (
+                  <button
+                    onClick={() => setGroupByStore(!groupByStore)}
+                    className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-xl border transition-all ${
+                      groupByStore
+                        ? 'bg-indigo-50 border-indigo-300 text-indigo-700 shadow-2xs'
+                        : 'bg-white border-slate-200 text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    <Layers className="w-3.5 h-3.5" />
+                    <span>{groupByStore ? 'Divided by Store' : 'Divide by Store'}</span>
+                  </button>
+                )}
+
+                {isOwner && (
+                  <button
+                    onClick={onOpenUpload}
+                    className="inline-flex items-center gap-1 text-xs font-semibold text-indigo-600 hover:text-indigo-700 bg-indigo-50 hover:bg-indigo-100 px-3 py-1.5 rounded-xl transition-colors"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>Add Product</span>
+                  </button>
+                )}
+              </div>
             </div>
+
+            {/* Store Group Filter Tabs */}
+            {channelProducts.length > 0 && (
+              <div className="flex items-center gap-1.5 overflow-x-auto pb-1 no-scrollbar text-xs">
+                <button
+                  onClick={() => setSelectedStoreGroup('all')}
+                  className={`px-3 py-1.5 font-bold rounded-xl transition-all whitespace-nowrap ${
+                    selectedStoreGroup === 'all'
+                      ? 'bg-slate-900 text-white shadow-xs'
+                      : 'bg-white text-slate-600 hover:text-slate-900 border border-slate-200'
+                  }`}
+                >
+                  All Stores ({channelProducts.length})
+                </button>
+
+                {Object.entries(storeGroupCounts).map(([groupName, count]) => {
+                  const cfg = getStoreGroupConfig(groupName as StoreGroup);
+                  const isActive = selectedStoreGroup === groupName;
+                  return (
+                    <button
+                      key={groupName}
+                      onClick={() => setSelectedStoreGroup(isActive ? 'all' : (groupName as StoreGroup))}
+                      className={`inline-flex items-center gap-1.5 px-3 py-1.5 font-bold rounded-xl transition-all whitespace-nowrap border ${
+                        isActive
+                          ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs'
+                          : `${cfg.badgeClass} hover:border-slate-300`
+                      }`}
+                    >
+                      <span>{cfg.icon}</span>
+                      <span>{cfg.badgeLabel}</span>
+                      <span className={`text-[10px] px-1.5 py-0.2 rounded-full ${isActive ? 'bg-white/20 text-white' : 'bg-white text-slate-700'}`}>
+                        {count}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
 
             {channelProducts.length === 0 ? (
               <div className="bg-white rounded-3xl border border-slate-200 p-8 sm:p-12 text-center max-w-md mx-auto space-y-4">
@@ -496,9 +584,48 @@ export const ChannelView: React.FC<Props> = ({
                   </button>
                 )}
               </div>
+            ) : groupByStore ? (
+              /* Divided into Different Store Groups */
+              <div className="space-y-6">
+                {Object.entries(groupedProducts).map(([groupName, prods]) => {
+                  const cfg = getStoreGroupConfig(groupName as StoreGroup);
+                  return (
+                    <div key={groupName} className="bg-slate-50/70 rounded-3xl border border-slate-200/90 p-4 sm:p-6 space-y-4">
+                      <div className="flex items-center justify-between pb-2 border-b border-slate-200/80">
+                        <div className="flex items-center gap-2.5">
+                          <span className="w-8 h-8 rounded-xl bg-white border border-slate-200 flex items-center justify-center text-base shadow-2xs">
+                            {cfg.icon}
+                          </span>
+                          <div>
+                            <h4 className="font-bold text-sm sm:text-base text-slate-900 flex items-center gap-2">
+                              <span>From {cfg.displayName}</span>
+                              <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${cfg.badgeClass}`}>
+                                {prods.length} {prods.length === 1 ? 'item' : 'items'}
+                              </span>
+                            </h4>
+                            <p className="text-[11px] text-slate-500">Curated store selection with verified links</p>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 sm:gap-6">
+                        {prods.map((product) => (
+                          <AmazonProductCard
+                            key={product.id}
+                            product={product}
+                            onSelect={onSelectProduct}
+                            onAddToCart={onAddToCart}
+                            onBuyNow={onBuyNow}
+                          />
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
             ) : (
               <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 sm:gap-6">
-                {channelProducts.map((product) => (
+                {displayedProducts.map((product) => (
                   <AmazonProductCard
                     key={product.id}
                     product={product}
@@ -516,29 +643,123 @@ export const ChannelView: React.FC<Props> = ({
       {/* TAB CONTENT 2: PRODUCTS & DEALS */}
       {activeTab === 'products' && (
         <div className="space-y-4">
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between flex-wrap gap-2">
             <h3 className="font-display font-bold text-base text-slate-900">
               All Products by {channel.name} ({channelProducts.length})
             </h3>
-            {isOwner && (
-              <button
-                onClick={onOpenUpload}
-                className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold rounded-full shadow-sm flex items-center gap-1.5 transition-all"
-              >
-                <Plus className="w-3.5 h-3.5" />
-                <span>List Product</span>
-              </button>
-            )}
+            
+            <div className="flex items-center gap-2">
+              {channelProducts.length > 0 && (
+                <button
+                  onClick={() => setGroupByStore(!groupByStore)}
+                  className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-xl border transition-all ${
+                    groupByStore
+                      ? 'bg-indigo-50 border-indigo-300 text-indigo-700 shadow-2xs'
+                      : 'bg-white border-slate-200 text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  <Layers className="w-3.5 h-3.5" />
+                  <span>{groupByStore ? 'Divided by Store' : 'Divide by Store'}</span>
+                </button>
+              )}
+
+              {isOwner && (
+                <button
+                  onClick={onOpenUpload}
+                  className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold rounded-full shadow-sm flex items-center gap-1.5 transition-all"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>List Product</span>
+                </button>
+              )}
+            </div>
           </div>
+
+          {/* Store Group Filter Tabs */}
+          {channelProducts.length > 0 && (
+            <div className="flex items-center gap-1.5 overflow-x-auto pb-1 no-scrollbar text-xs">
+              <button
+                onClick={() => setSelectedStoreGroup('all')}
+                className={`px-3 py-1.5 font-bold rounded-xl transition-all whitespace-nowrap ${
+                  selectedStoreGroup === 'all'
+                    ? 'bg-slate-900 text-white shadow-xs'
+                    : 'bg-white text-slate-600 hover:text-slate-900 border border-slate-200'
+                }`}
+              >
+                All Stores ({channelProducts.length})
+              </button>
+
+              {Object.entries(storeGroupCounts).map(([groupName, count]) => {
+                const cfg = getStoreGroupConfig(groupName as StoreGroup);
+                const isActive = selectedStoreGroup === groupName;
+                return (
+                  <button
+                    key={groupName}
+                    onClick={() => setSelectedStoreGroup(isActive ? 'all' : (groupName as StoreGroup))}
+                    className={`inline-flex items-center gap-1.5 px-3 py-1.5 font-bold rounded-xl transition-all whitespace-nowrap border ${
+                      isActive
+                        ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs'
+                        : `${cfg.badgeClass} hover:border-slate-300`
+                    }`}
+                  >
+                    <span>{cfg.icon}</span>
+                    <span>{cfg.badgeLabel}</span>
+                    <span className={`text-[10px] px-1.5 py-0.2 rounded-full ${isActive ? 'bg-white/20 text-white' : 'bg-white text-slate-700'}`}>
+                      {count}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
 
           {channelProducts.length === 0 ? (
             <div className="bg-white rounded-3xl border border-slate-200 p-10 text-center space-y-3">
               <ShoppingBag className="w-10 h-10 mx-auto text-slate-400" />
               <p className="text-xs text-slate-500">No products uploaded by this channel yet.</p>
             </div>
+          ) : groupByStore ? (
+            /* Divided into Different Store Groups */
+            <div className="space-y-6">
+              {Object.entries(groupedProducts).map(([groupName, prods]) => {
+                const cfg = getStoreGroupConfig(groupName as StoreGroup);
+                return (
+                  <div key={groupName} className="bg-slate-50/70 rounded-3xl border border-slate-200/90 p-4 sm:p-6 space-y-4">
+                    <div className="flex items-center justify-between pb-2 border-b border-slate-200/80">
+                      <div className="flex items-center gap-2.5">
+                        <span className="w-8 h-8 rounded-xl bg-white border border-slate-200 flex items-center justify-center text-base shadow-2xs">
+                          {cfg.icon}
+                        </span>
+                        <div>
+                          <h4 className="font-bold text-sm sm:text-base text-slate-900 flex items-center gap-2">
+                            <span>From {cfg.displayName}</span>
+                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${cfg.badgeClass}`}>
+                              {prods.length} {prods.length === 1 ? 'item' : 'items'}
+                            </span>
+                          </h4>
+                          <p className="text-[11px] text-slate-500">Curated store selection with verified links</p>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 sm:gap-6">
+                      {prods.map((product) => (
+                        <AmazonProductCard
+                          key={product.id}
+                          product={product}
+                          onSelect={onSelectProduct}
+                          onAddToCart={onAddToCart}
+                          onBuyNow={onBuyNow}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 sm:gap-6">
-              {channelProducts.map((product) => (
+              {displayedProducts.map((product) => (
                 <AmazonProductCard
                   key={product.id}
                   product={product}
@@ -826,7 +1047,7 @@ export const ChannelView: React.FC<Props> = ({
                 </div>
               </div>
               <div className="text-2xl sm:text-3xl font-black text-slate-900 font-tabular">
-                {channel.followerCount.toLocaleString()}
+                {(channel.followerCount ?? channel.followersCount ?? 0).toLocaleString()}
               </div>
               <p className="text-[11px] text-slate-500">
                 Active followers receiving your deal updates
@@ -979,7 +1200,7 @@ export const ChannelView: React.FC<Props> = ({
             <div className="space-y-3">
               <h4 className="font-bold text-slate-800">Channel Statistics</h4>
               <div className="space-y-2 text-slate-600">
-                <div>Total Followers: <strong className="text-slate-800">{channel.followerCount.toLocaleString()}</strong></div>
+                <div>Total Followers: <strong className="text-slate-800">{(channel.followerCount ?? channel.followersCount ?? 0).toLocaleString()}</strong></div>
                 <div>Products Listed: <strong className="text-slate-800">{channelProducts.length}</strong></div>
                 <div>Video Reviews: <strong className="text-slate-800">{videoProducts.length}</strong></div>
                 <div>Total Product Clicks: <strong className="text-slate-800">{totalClicksCount.toLocaleString()}</strong></div>

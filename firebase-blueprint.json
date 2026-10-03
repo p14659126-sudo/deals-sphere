@@ -170,6 +170,32 @@
         "createdAt": { "type": "string", "maxLength": 64 }
       },
       "required": ["channelId", "ownerId", "createdAt"]
+    },
+    "Video": {
+      "title": "Video",
+      "description": "YouTube-style video uploaded by channel creator with attached product deals",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "channelId": { "type": "string", "maxLength": 128 },
+        "channelUsername": { "type": "string", "maxLength": 64 },
+        "channelName": { "type": "string", "maxLength": 128 },
+        "ownerId": { "type": "string", "maxLength": 128 },
+        "title": { "type": "string", "maxLength": 256 },
+        "description": { "type": "string", "maxLength": 5000 },
+        "videoUrl": { "type": "string", "maxLength": 2000 },
+        "thumbnailUrl": { "type": "string", "maxLength": 2000 },
+        "category": { "type": "string", "maxLength": 64 },
+        "keywords": { "type": "array" },
+        "attachedProductIds": { "type": "array" },
+        "affiliateLink": { "type": "string", "maxLength": 2000 },
+        "visibility": { "type": "string", "enum": ["public", "unlisted", "private", "draft"] },
+        "views": { "type": "number" },
+        "likes": { "type": "number" },
+        "createdAt": { "type": "string", "maxLength": 64 },
+        "updatedAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["id", "channelId", "ownerId", "title", "videoUrl", "visibility", "createdAt"]
     }
   },
   "firestore": {
@@ -188,6 +214,10 @@
     "/products/{productId}": {
       "schema": "Product",
       "description": "Products uploaded and managed by channel owners"
+    },
+    "/videos/{videoId}": {
+      "schema": "Video",
+      "description": "Channel videos with attached products and affiliate links"
     },
     "/analytics/{eventId}": {
       "schema": "AnalyticsEvent",
